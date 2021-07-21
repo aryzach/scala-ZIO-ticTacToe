@@ -1,3 +1,4 @@
 make BotChoice and Move inherit from trait Input
 abstract functions getMove and getBotChoice
 collect data and make smarter bot 
+optional arbritrary sized board

@@ -6,7 +6,7 @@ import java.io.IOException
 import scala.annotation.tailrec
 import collection.immutable.SortedMap
 
-case class State (board: Board, turn: Boolean, bot: BotChoice) {
+case class State (board: Board, turn: Boolean, bot: BoolInput) {
   val winner: Option[Boolean] = board.winner
   val draw: Boolean = (this.winner == None) && (board.getEmpty.size == 0)
   def update(m: Move): State = 
@@ -17,7 +17,7 @@ case class State (board: Board, turn: Boolean, bot: BotChoice) {
 }
 
 object State {
-  def initialState(b: BotChoice): State = new State(Board(SortedMap()), true, b) {}
+  def initialState(b: BoolInput): State = new State(Board(SortedMap()), true, b) {}
 }
 
 case class Board(b: SortedMap[Int, Boolean]) {
@@ -70,12 +70,12 @@ object Move {
   def makeFromInt(i: Int): Move = new Move(i) {}
 }
 
-abstract case class BotChoice (playBot: Boolean) 
-object BotChoice {
-  def make(s: String): Option[BotChoice] =
+abstract case class BoolInput (b: Boolean) 
+object BoolInput {
+  def make(s: String): Option[BoolInput] =
     s.headOption collect {
-      case 'y' => new BotChoice(true) {}
-      case 'n'   => new BotChoice(false) {}
+      case 'y' => new BoolInput(true) {}
+      case 'n'   => new BoolInput(false) {}
     }
 }
 
@@ -103,7 +103,16 @@ object TicTacToe extends App {
 
   val getMove: ZIO[Console, IOException, Move] = getStrLn.flatMap(m => ZIO.fromOption(Move.make(m)) <> putStrLn("not a board position") *> getMove)
 
-  val getBotChoice: ZIO[Console, IOException, BotChoice] = putStrLn("play bot? y or n").flatMap(_ =>getStrLn).flatMap(m => ZIO.fromOption(BotChoice.make(m)) <> putStrLn("enter 'y' or 'n'") *> getBotChoice)
+  val getBotChoice: ZIO[Console, IOException, BoolInput] = getBoolInput("play bot? y or n")("enter 'y' or 'n'") 
+  val playAgain: ZIO[Console, IOException, BoolInput] = getBoolInput("play again? y or n")("enter 'y' or 'n'") 
+
+  def getBoolInput(message: String)(error: String): ZIO[Console, IOException, BoolInput] = 
+    for {
+      _ <- putStrLn(message)
+      i <- getStrLn 
+      f <- ZIO.fromOption(BoolInput.make(i)) <> putStrLn(error) *> getBoolInput(message)(error)
+    } yield f
+
 
 
   def getBotMove(s: State): ZIO[Random, Nothing, Move] = 
@@ -123,13 +132,13 @@ object TicTacToe extends App {
   def gameLoop(s: State): ZIO[Console with Random, IOException , Unit] = {
     for {
       _ <- displayState(s)
-      m <- if (s.bot.playBot && !s.turn) getBotMove(s) else getMove
+      m <- if (s.bot.b && !s.turn) getBotMove(s) else getMove
       newState = s.update(m)
       a = handleMove(m)(s)(newState)
       _ <- a match {
         case Result.Invalid => putStrLn("invalid") *> gameLoop(s)
-        case Result.Draw    => displayState(s) *> putStrLn("draw") 
-        case Result.Win     => displayState(s) *> putStrLn("win")
+        case Result.Draw    => displayState(newState) *> putStrLn("draw") 
+        case Result.Win     => displayState(newState) *> putStrLn("win")
         case Result.Valid   => gameLoop(newState)
       }
     } yield ()
@@ -137,8 +146,12 @@ object TicTacToe extends App {
 
   val mainLoop: ZIO[Console with Random, IOException, Unit] = 
     for {
-      bot <- getBotChoice
-      _   <- gameLoop(State.initialState(bot))
+      bot    <- getBotChoice
+      again  <- gameLoop(State.initialState(bot)) *> playAgain
+      _      <- again.b match {
+        case true => mainLoop
+        case false => ZIO.succeed(()) 
+      }
     } yield ()
 
   def run(args: List[String]): ZIO[ZEnv, Nothing, ExitCode] =
